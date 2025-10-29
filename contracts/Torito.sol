@@ -4,7 +4,6 @@ pragma solidity 0.8.30;
 import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {IPriceOracle} from "./PriceOracle.sol";
-import {console} from "forge-std/Test.sol";
 
 interface IAavePool {
     function supply(address asset, uint256 amount, address onBehalfOf, uint16 referralCode) external;
@@ -15,7 +14,8 @@ interface IAavePool {
 contract Torito is Ownable {
     // Enums
     enum SupplyStatus { INACTIVE, ACTIVE }
-    enum BorrowStatus { INACTIVE, REQUESTED, PROCESSED, CANCELED, REPAID, LIQUIDATED }
+    enum BorrowStatus { INACTIVE, ACTIVE, REPAID, LIQUIDATED }
+    enum RequestStatus { PENDING, PROCESSED, CANCELED }
 
     // Structs
     struct Supply {
@@ -23,6 +23,7 @@ contract Torito is Ownable {
         address owner;
         uint256 scaledBalance;
         address asset;
+        uint256 usedCollateral;       // amount of collateral currently locked by borrows
         SupplyStatus status;
     }
 
@@ -33,7 +34,17 @@ contract Torito is Ownable {
         address collateralAsset;
         bytes32 fiatCurrency;
         uint256 totalRepaid;
+        uint256 lockedCollateralAsset; // collateral locked for this borrow (in asset units)
         BorrowStatus status;
+    }
+
+    struct BorrowRequest {
+        uint256 requestId;
+        address owner;
+        address collateralAsset;
+        bytes32 fiatCurrency;
+        uint256 borrowAmount; // in currency units (not scaled)
+        RequestStatus status;
     }
 
     struct Asset {
@@ -64,9 +75,8 @@ contract Torito is Ownable {
 
     // Storage
     mapping(uint256 => Supply) public supplies; // supplyId => supply
-    mapping(uint256 => Borrow) public borrows; // borrowId => borrow
-    mapping(address => uint256[]) public userSupplies; // user => array of supplyIds
-    mapping(address => uint256[]) public userBorrows; // user => array of borrowIds
+    mapping(uint256 => Borrow) public borrows; // borrowId => borrow (active positions)
+    mapping(uint256 => BorrowRequest) public borrowRequests; // requestId => request
     mapping(address => Asset) public supportedAssets; // token => asset info
     mapping(bytes32 => FiatCurrency) public supportedCurrencies;
     
@@ -78,12 +88,12 @@ contract Torito is Ownable {
     event SupplyCreated(uint256 indexed supplyId, address indexed user, address token, uint256 amount);
     event SupplyDeposited(uint256 indexed supplyId, address indexed user, address token, uint256 amount, uint256 totalAmount);
     event SupplyWithdrawn(uint256 indexed supplyId, address indexed user, address token, uint256 amount, uint256 totalAmount);
-    event BorrowCreated(uint256 indexed borrowId, address indexed user, bytes32 currency, uint256 amount);
+    event BorrowRequestCreated(uint256 indexed requestId, address indexed user, address collateralAsset, bytes32 currency, uint256 amount);
+    event BorrowRequestProcessed(uint256 indexed requestId, uint256 indexed borrowId, address indexed user, bytes32 currency, uint256 amount, uint256 lockedCollateralAsset);
+    event BorrowRequestCanceled(uint256 indexed requestId, address indexed user, bytes32 currency);
     event BorrowUpdated(uint256 indexed borrowId, address indexed user, bytes32 currency, uint256 amount, uint256 totalAmount);
     event LoanRepaid(uint256 indexed borrowId, address indexed user, bytes32 currency, uint256 amount, uint256 remainingAmount);
     event CollateralLiquidated(uint256 indexed borrowId, address indexed user, uint256 collateralAmount);
-    event BorrowProcessed(uint256 indexed borrowId, address indexed user, bytes32 currency);
-    event BorrowCanceled(uint256 indexed borrowId, address indexed user, bytes32 currency);
 
     constructor(address _aavePool, address _owner) Ownable(_owner) {
         aavePool = IAavePool(_aavePool);
@@ -167,13 +177,13 @@ contract Torito is Ownable {
         _;
     }
 
-    modifier hasBorrowRequested(uint256 borrowId) {
-        require(borrows[borrowId].status == BorrowStatus.REQUESTED, "not requested");
+    modifier hasRequestPending(uint256 requestId) {
+        require(borrowRequests[requestId].status == RequestStatus.PENDING, "not pending");
         _;
     }
 
-    modifier hasBorrowProcessed(uint256 borrowId) {
-        require(borrows[borrowId].status == BorrowStatus.PROCESSED, "not processed");
+    modifier hasBorrowActive(uint256 borrowId) {
+        require(borrows[borrowId].status == BorrowStatus.ACTIVE, "not active");
         _;
     }
 
@@ -237,7 +247,7 @@ contract Torito is Ownable {
             userSupply.scaledBalance = (amount * RAY) / currentIndex;
             
             // Add supplyId to user's supply list
-            userSupplies[msg.sender].push(supplyId);
+            // userSupplies[msg.sender].push(supplyId);
             
             emit SupplyCreated(supplyId, msg.sender, asset, amount);
         } else {
@@ -248,118 +258,165 @@ contract Torito is Ownable {
         }
     }
 
-    // --- Borrow ---
+    // --- Borrow Requests ---
     function borrow(address collateralAsset, uint256 borrowAmount, bytes32 fiatCurrency)
         external
     {
         require(supportedCurrencies[fiatCurrency].currency != bytes32(0), "Currency not supported");
-        updateBorrowIndex(fiatCurrency, collateralAsset);  /// 🔑 sync interest
 
-        // Get the supply ID for this user and asset
+        // Must have an active supply for the collateral asset
         uint256 supplyId = uint256(keccak256(abi.encodePacked(msg.sender, collateralAsset)));
         require(supplies[supplyId].owner != address(0), "no supply");
         require(supplies[supplyId].status == SupplyStatus.ACTIVE, "supply not active");
 
-        Supply storage userSupply = supplies[supplyId];
+        // Create borrow request (no collateral is locked yet)
+        uint256 requestId = uint256(keccak256(abi.encodePacked(msg.sender, collateralAsset, fiatCurrency, userNonces[msg.sender]++)));
+        BorrowRequest storage req = borrowRequests[requestId];
+        req.requestId = requestId;
+        req.owner = msg.sender;
+        req.collateralAsset = collateralAsset;
+        req.fiatCurrency = fiatCurrency;
+        req.borrowAmount = borrowAmount;
+        req.status = RequestStatus.PENDING;
 
-        uint256 borrowValueAsset = convertCurrencyToAsset(fiatCurrency, borrowAmount, collateralAsset);
-        uint256 requiredCollateralAsset = (borrowValueAsset * supportedCurrencies[fiatCurrency].collateralizationRatio) / 1e18;
-
-        console.log("borrowValueAsset", borrowValueAsset);
-        console.log("collateralizationRatio", supportedCurrencies[fiatCurrency].collateralizationRatio);
-
-        uint256 currentIndex = aavePool.getReserveNormalizedIncome(collateralAsset);
-        uint256 collateralValueAsset = (userSupply.scaledBalance * currentIndex) / RAY;
-        console.log("collateralValueAsset", collateralValueAsset);
-        console.log("requiredCollateralAsset", requiredCollateralAsset);
-        require(collateralValueAsset >= requiredCollateralAsset, "insufficient collateral");
-
-        // Create new borrow with unique ID using user's nonce and collateral asset
-        uint256 borrowId = uint256(keccak256(abi.encodePacked(msg.sender, collateralAsset, userNonces[msg.sender]++)));
-        
-        Borrow storage newBorrow = borrows[borrowId];
-        newBorrow.borrowId = borrowId;
-        newBorrow.owner = msg.sender;
-        newBorrow.fiatCurrency = fiatCurrency;
-        newBorrow.collateralAsset = collateralAsset;
-        newBorrow.status = BorrowStatus.REQUESTED;
-        newBorrow.borrowedAmount = (borrowAmount * RAY) / supportedCurrencies[fiatCurrency].borrowIndex;  /// 🔑 scaled
-        newBorrow.totalRepaid = 0;
-
-        // Add borrowId to user's borrow list
-        userBorrows[msg.sender].push(borrowId);
-
-        emit BorrowCreated(borrowId, msg.sender, fiatCurrency, borrowAmount);
+        emit BorrowRequestCreated(requestId, msg.sender, collateralAsset, fiatCurrency, borrowAmount);
     }
 
-    function processBorrowRequest(uint256 borrowId) external onlyOwner hasBorrowRequested(borrowId) {
-        Borrow storage borrowRecord = borrows[borrowId];
-        borrowRecord.status = BorrowStatus.PROCESSED;
-        emit BorrowProcessed(borrowId, borrowRecord.owner, borrowRecord.fiatCurrency);
+    function processBorrowRequest(uint256 requestId) public onlyOwner hasRequestPending(requestId) {
+        _processBorrowRequest(requestId);
     }
 
-    function processBorrowRequests(uint256[] calldata borrowIds) external onlyOwner {
-        require(borrowIds.length > 0, "Empty array");
-        require(borrowIds.length <= 50, "Too many requests"); // Gas limit protection
-        
-        for (uint256 i = 0; i < borrowIds.length; i++) {
-            uint256 borrowId = borrowIds[i];
-            require(borrows[borrowId].owner != address(0), "Borrow not found");
-            require(borrows[borrowId].status == BorrowStatus.REQUESTED, "Borrow not requested");
-            
-            Borrow storage borrowRecord = borrows[borrowId];
-            borrowRecord.status = BorrowStatus.PROCESSED;
-            emit BorrowProcessed(borrowId, borrowRecord.owner, borrowRecord.fiatCurrency);
+    function _processBorrowRequest(uint256 requestId) internal {
+        BorrowRequest storage req = borrowRequests[requestId];
+
+        // Sync interest for this currency
+        updateBorrowIndex(req.fiatCurrency, req.collateralAsset);
+
+        // 1) Validate collateral and compute the exact amount to lock
+        uint256 requiredCollateralAsset;
+        {
+            uint256 supplyId = uint256(keccak256(abi.encodePacked(req.owner, req.collateralAsset)));
+            Supply storage userSupply = supplies[supplyId];
+            require(userSupply.owner != address(0), "no supply");
+            require(userSupply.status == SupplyStatus.ACTIVE, "supply not active");
+
+            uint256 borrowValueAsset = convertCurrencyToAsset(req.fiatCurrency, req.borrowAmount, req.collateralAsset);
+            requiredCollateralAsset = (borrowValueAsset * supportedCurrencies[req.fiatCurrency].collateralizationRatio) / 1e18;
+
+            uint256 currentIndex = aavePool.getReserveNormalizedIncome(req.collateralAsset);
+            uint256 totalCollateral = (userSupply.scaledBalance * currentIndex) / RAY;
+            uint256 availableCollateral = totalCollateral > userSupply.usedCollateral ? totalCollateral - userSupply.usedCollateral : 0;
+            require(availableCollateral >= requiredCollateralAsset, "insufficient collateral");
+        }
+
+        // 2) Upsert active borrow per (user, collateralAsset, fiatCurrency)
+        uint256 borrowId = uint256(keccak256(abi.encodePacked(req.owner, req.collateralAsset, req.fiatCurrency)));
+        Borrow storage b = borrows[borrowId];
+        if (b.owner == address(0)) {
+            b.borrowId = borrowId;
+            b.owner = req.owner;
+            b.collateralAsset = req.collateralAsset;
+            b.fiatCurrency = req.fiatCurrency;
+            b.totalRepaid = 0;
+            b.borrowedAmount = 0;
+            b.lockedCollateralAsset = 0;
+            b.status = BorrowStatus.ACTIVE;
+        } else if (b.status != BorrowStatus.ACTIVE) {
+            // Reset and reactivate if previously closed
+            b.totalRepaid = 0;
+            b.borrowedAmount = 0;
+            b.lockedCollateralAsset = 0;
+            b.status = BorrowStatus.ACTIVE;
+        }
+
+        // 3) Add to position and lock collateral
+        b.borrowedAmount += (req.borrowAmount * RAY) / supportedCurrencies[req.fiatCurrency].borrowIndex;
+        b.lockedCollateralAsset += requiredCollateralAsset;
+        {
+            uint256 supplyId2 = uint256(keccak256(abi.encodePacked(req.owner, req.collateralAsset)));
+            supplies[supplyId2].usedCollateral += requiredCollateralAsset;
+        }
+
+        // 4) Finalize
+        req.status = RequestStatus.PROCESSED;
+        emit BorrowRequestProcessed(requestId, borrowId, req.owner, req.fiatCurrency, req.borrowAmount, requiredCollateralAsset);
+        emit BorrowUpdated(
+            borrowId,
+            req.owner,
+            req.fiatCurrency,
+            req.borrowAmount,
+            (b.borrowedAmount * supportedCurrencies[req.fiatCurrency].borrowIndex) / RAY - b.totalRepaid
+        );
+    }
+
+    function processBorrowRequests(uint256[] calldata requestIds) external onlyOwner {
+        require(requestIds.length > 0, "Empty array");
+        require(requestIds.length <= 50, "Too many requests"); // Gas limit protection
+        for (uint256 i = 0; i < requestIds.length; i++) {
+            uint256 rid = requestIds[i];
+            require(borrowRequests[rid].owner != address(0), "Request not found");
+            require(borrowRequests[rid].status == RequestStatus.PENDING, "Request not pending");
+            _processBorrowRequest(rid);
         }
     }
 
-    function cancelBorrowRequest(uint256 borrowId) external onlyOwner hasBorrowRequested(borrowId) {
-        Borrow storage borrowRecord = borrows[borrowId];
-        borrowRecord.status = BorrowStatus.CANCELED;
-        emit BorrowCanceled(borrowId, borrowRecord.owner, borrowRecord.fiatCurrency);
+    function cancelBorrowRequest(uint256 requestId) external onlyOwner hasRequestPending(requestId) {
+        BorrowRequest storage req = borrowRequests[requestId];
+        req.status = RequestStatus.CANCELED;
+        emit BorrowRequestCanceled(requestId, req.owner, req.fiatCurrency);
     }
 
-    function cancelBorrowRequests(uint256[] calldata borrowIds) external onlyOwner {
-        require(borrowIds.length > 0, "Empty array");
-        require(borrowIds.length <= 50, "Too many requests"); // Gas limit protection
-        
-        for (uint256 i = 0; i < borrowIds.length; i++) {
-            uint256 borrowId = borrowIds[i];
-            require(borrows[borrowId].owner != address(0), "Borrow not found");
-            require(borrows[borrowId].status == BorrowStatus.REQUESTED, "Borrow not requested");
-            
-            Borrow storage borrowRecord = borrows[borrowId];
-            borrowRecord.status = BorrowStatus.CANCELED;
-            emit BorrowCanceled(borrowId, borrowRecord.owner, borrowRecord.fiatCurrency);
+    function cancelBorrowRequests(uint256[] calldata requestIds) external onlyOwner {
+        require(requestIds.length > 0, "Empty array");
+        require(requestIds.length <= 50, "Too many requests"); // Gas limit protection
+        for (uint256 i = 0; i < requestIds.length; i++) {
+            uint256 rid = requestIds[i];
+            require(borrowRequests[rid].owner != address(0), "Request not found");
+            require(borrowRequests[rid].status == RequestStatus.PENDING, "Request not pending");
+            BorrowRequest storage req = borrowRequests[rid];
+            req.status = RequestStatus.CANCELED;
+            emit BorrowRequestCanceled(rid, req.owner, req.fiatCurrency);
         }
     }
 
     // --- Repay ---
-    function repayLoan(uint256 borrowId, uint256 repaymentAmount) external hasBorrowProcessed(borrowId) {
+    function repayLoan(uint256 borrowId, uint256 repaymentAmount) external hasBorrowActive(borrowId) {
         Borrow storage loan = borrows[borrowId];
         require(loan.owner == msg.sender, "not your borrow");
         
         updateBorrowIndex(loan.fiatCurrency, loan.collateralAsset);  /// 🔑 sync
 
-        uint256 totalOwed = (loan.borrowedAmount * supportedCurrencies[loan.fiatCurrency].borrowIndex) / RAY
-            - loan.totalRepaid;
+        uint256 currentDebt = (loan.borrowedAmount * supportedCurrencies[loan.fiatCurrency].borrowIndex) / RAY;
+        uint256 outstanding = currentDebt - loan.totalRepaid;
+        require(repaymentAmount <= outstanding, "exceeds owed");
 
-        require(repaymentAmount <= totalOwed, "exceeds owed");
+        // Proportional collateral release based on repayment against outstanding
+        uint256 release = loan.lockedCollateralAsset == 0 ? 0 : (loan.lockedCollateralAsset * repaymentAmount) / outstanding;
+        if (release > 0) {
+            uint256 supplyId = uint256(keccak256(abi.encodePacked(msg.sender, loan.collateralAsset)));
+            Supply storage userSupply = supplies[supplyId];
+            if (release > loan.lockedCollateralAsset) release = loan.lockedCollateralAsset;
+            loan.lockedCollateralAsset -= release;
+            if (release > userSupply.usedCollateral) {
+                userSupply.usedCollateral = 0;
+            } else {
+                userSupply.usedCollateral -= release;
+            }
+        }
 
         loan.totalRepaid += repaymentAmount;
 
-        if (loan.totalRepaid >= totalOwed) {
+        uint256 remaining = outstanding - repaymentAmount;
+        if (remaining == 0) {
             loan.status = BorrowStatus.REPAID;
-            uint256 supplyId = uint256(keccak256(abi.encodePacked(msg.sender, loan.collateralAsset)));
-            supplies[supplyId].status = SupplyStatus.ACTIVE;
+            loan.lockedCollateralAsset = 0;
         }
 
-        uint256 remaining = totalOwed - repaymentAmount;
         emit LoanRepaid(borrowId, msg.sender, loan.fiatCurrency, repaymentAmount, remaining);
     }
 
     // --- Liquidation ---
-    function liquidate(uint256 borrowId) external hasBorrowProcessed(borrowId) {
+    function liquidate(uint256 borrowId) external hasBorrowActive(borrowId) {
         Borrow storage loan = borrows[borrowId];
 
         uint256 supplyId = uint256(keccak256(abi.encodePacked(loan.owner, loan.collateralAsset)));
@@ -379,70 +436,16 @@ contract Torito is Ownable {
         require(ratio < threshold, "not liquidatable");
 
         loan.status = BorrowStatus.LIQUIDATED;
-        emit CollateralLiquidated(borrowId, loan.owner, userSupply.scaledBalance);
-    }
-
-    // --- Health Factor Functions ---
-    function _checkHealthFactor(address user, address asset, uint256 withdrawAmount) internal view returns (bool) {
-        // Get user's total debt across all currencies
-        uint256 totalDebtAsset = _getUserTotalDebtAsset(user);
-        if (totalDebtAsset == 0) return true; // No debt, can withdraw freely
-
-        // Get user's total collateral value after withdrawal
-        uint256 totalCollateralAsset = _getUserTotalCollateralAsset(user, asset, withdrawAmount);
         
-        // Calculate health factor: collateral / debt
-        // Health factor should be >= 1.5 (150%) for safety
-        uint256 healthFactor = (totalCollateralAsset * 1e18) / totalDebtAsset;
-        return healthFactor >= 150e16; // 150% minimum health factor
-    }
-
-    function _getUserTotalDebtAsset(address user) internal view returns (uint256) {
-        uint256[] memory userBorrowIds = userBorrows[user];
-        uint256 totalDebtAsset = 0;
-
-        for (uint256 i = 0; i < userBorrowIds.length; i++) {
-            uint256 borrowId = userBorrowIds[i];
-            Borrow storage userBorrow = borrows[borrowId];
-            
-            // Only count active borrows (PROCESSED status)
-            if (userBorrow.status == BorrowStatus.PROCESSED) {
-                // Calculate current debt with interest
-                uint256 currentDebt = (userBorrow.borrowedAmount * supportedCurrencies[userBorrow.fiatCurrency].borrowIndex) / RAY;
-                uint256 outstandingDebt = currentDebt - userBorrow.totalRepaid;
-                
-                // Convert debt to asset
-                uint256 debtAsset = convertCurrencyToAsset(userBorrow.fiatCurrency, outstandingDebt, userBorrow.collateralAsset);
-                totalDebtAsset += debtAsset;
-            }
+        uint256 released = loan.lockedCollateralAsset;
+        loan.lockedCollateralAsset = 0;
+        if (released > userSupply.usedCollateral) {
+            userSupply.usedCollateral = 0;
+        } else {
+            userSupply.usedCollateral -= released;
         }
         
-        return totalDebtAsset;
-    }
-
-    function _getUserTotalCollateralAsset(address user, address asset, uint256 withdrawAmount) internal view returns (uint256) {
-        uint256[] memory userSupplyIds = userSupplies[user];
-        uint256 totalCollateralAsset = 0;
-
-        for (uint256 i = 0; i < userSupplyIds.length; i++) {
-            uint256 supplyId = userSupplyIds[i];
-            Supply storage userSupply = supplies[supplyId];
-            
-            if (userSupply.status == SupplyStatus.ACTIVE) {
-                uint256 currentIndex = aavePool.getReserveNormalizedIncome(userSupply.asset);
-                uint256 supplyValue = (userSupply.scaledBalance * currentIndex) / RAY;
-                
-                // If this is the asset being withdrawn, subtract the withdraw amount
-                if (userSupply.asset == asset) {
-                    require(supplyValue >= withdrawAmount, "Insufficient supply balance");
-                    supplyValue -= withdrawAmount;
-                }
-                
-                totalCollateralAsset += supplyValue;
-            }
-        }
-        
-        return totalCollateralAsset;
+        emit CollateralLiquidated(borrowId, loan.owner, released);
     }
 
     function withdrawSupply(uint256 supplyId, uint256 withdrawAmount) external hasSupply(supplyId) {
@@ -450,10 +453,12 @@ contract Torito is Ownable {
         require(userSupply.owner == msg.sender, "not your supply");
         require(userSupply.status == SupplyStatus.ACTIVE, "supply not active");
 
-        // Check health factor before withdrawal
-        require(_checkHealthFactor(msg.sender, userSupply.asset, withdrawAmount), "Insufficient health factor");
-
+        // Simple and efficient collateral check - no loops needed!
         uint256 currentIndex = aavePool.getReserveNormalizedIncome(userSupply.asset);
+        uint256 totalCollateral = (userSupply.scaledBalance * currentIndex) / RAY;
+        uint256 availableCollateral = totalCollateral > userSupply.usedCollateral ? totalCollateral - userSupply.usedCollateral : 0;
+        require(withdrawAmount <= availableCollateral, "Insufficient available collateral");
+
         userSupply.scaledBalance -= (withdrawAmount * RAY) / currentIndex;
         IERC20(userSupply.asset).transfer(msg.sender, withdrawAmount);
         uint256 userBalance = (userSupply.scaledBalance * currentIndex) / RAY;
@@ -461,66 +466,46 @@ contract Torito is Ownable {
     }
 
     // Convert FROM currency TO asset with proper decimal handling
-// Price represents: how much currency per 1 unit of asset
-// Example: price = 1257 means 12.57 BOB per 1 USD (with currencyDecimals precision)
-function convertCurrencyToAsset(bytes32 currency, uint256 amount, address collateralAsset) public view returns (uint256) {
-    FiatCurrency storage fc = supportedCurrencies[currency];
-    require(fc.currency != bytes32(0), "Currency not supported");
-    
-    uint256 price = IPriceOracle(fc.oracle).getPrice(currency);
-    console.log("price", price);
-    require(price > 0, "Price cannot be zero");
-    
-    // Get currency and asset decimals
-    uint8 currencyDecimals = fc.decimals;
-    uint8 assetDecimals = supportedAssets[collateralAsset].decimals;
-    
-    // Convert: amount (in currencyDecimals) ÷ price (in currencyDecimals) = result (in assetDecimals)
-    // Example: 10000 (100.00 BOB) ÷ 1257 (12.57 BOB/USD) = 7.95 USD = 795 cents
-    // Formula: (amount × 10^assetDecimals) ÷ price
-    
-    uint256 result = (amount * (10 ** assetDecimals)) / price;
-    
-    return result;
-}
-
-// Convert FROM asset TO currency with proper decimal handling
-// Price represents: how much currency per 1 unit of asset
-// Example: price = 1257 means 12.57 BOB per 1 USD (with currencyDecimals precision)
-function convertAssetToCurrency(bytes32 currency, uint256 assetAmount, address collateralAsset) public view returns (uint256) {
-    FiatCurrency storage fc = supportedCurrencies[currency];
-    require(fc.currency != bytes32(0), "Currency not supported");
-    
-    uint256 price = IPriceOracle(fc.oracle).getPrice(currency);
-    require(price > 0, "Price cannot be zero");
-    
-    // Get currency and asset decimals
-    uint8 currencyDecimals = fc.decimals;
-    uint8 assetDecimals = supportedAssets[collateralAsset].decimals;
-    
-    // Convert: assetAmount (in assetDecimals) × price (in currencyDecimals) = result (in currencyDecimals)
-    // Example: 795 (7.95 USD) × 1257 (12.57 BOB/USD) = 99.93 BOB = 9993 in raw
-    // Formula: (assetAmount × price) ÷ 10^assetDecimals
-    
-    uint256 result = (assetAmount * price) / (10 ** assetDecimals);
-    
-    return result;
-}
-
-    // --- Public Health Factor Functions ---
-    function getUserHealthFactor(address user) external view returns (uint256) {
-        uint256 totalDebtAsset = _getUserTotalDebtAsset(user);
-        if (totalDebtAsset == 0) return type(uint256).max; // No debt = infinite health factor
+    // Price represents: how much currency per 1 unit of asset
+    // Example: price = 1257 means 12.57 BOB per 1 USD (with currencyDecimals precision)
+    function convertCurrencyToAsset(bytes32 currency, uint256 amount, address collateralAsset) public view returns (uint256) {
+        FiatCurrency storage fc = supportedCurrencies[currency];
+        require(fc.currency != bytes32(0), "Currency not supported");
         
-        uint256 totalCollateralAsset = _getUserTotalCollateralAsset(user, address(0), 0);
-        return (totalCollateralAsset * 1e18) / totalDebtAsset;
+        uint256 price = IPriceOracle(fc.oracle).getPrice(currency);
+        require(price > 0, "Price cannot be zero");
+        
+        // Get asset decimals
+        uint8 assetDecimals = supportedAssets[collateralAsset].decimals;
+        
+        // Convert: amount (in currencyDecimals) ÷ price (in currencyDecimals) = result (in assetDecimals)
+        // Example: 10000 (100.00 BOB) ÷ 1257 (12.57 BOB/USD) = 7.95 USD = 795 cents
+        // Formula: (amount × 10^assetDecimals) ÷ price
+        
+        uint256 result = (amount * (10 ** assetDecimals)) / price;
+        
+        return result;
     }
 
-    function getUserTotalDebtAsset(address user) external view returns (uint256) {
-        return _getUserTotalDebtAsset(user);
-    }
-
-    function getUserTotalCollateralAsset(address user) external view returns (uint256) {
-        return _getUserTotalCollateralAsset(user, address(0), 0);
+    // Convert FROM asset TO currency with proper decimal handling
+    // Price represents: how much currency per 1 unit of asset
+    // Example: price = 1257 means 12.57 BOB per 1 USD (with currencyDecimals precision)
+    function convertAssetToCurrency(bytes32 currency, uint256 assetAmount, address collateralAsset) public view returns (uint256) {
+        FiatCurrency storage fc = supportedCurrencies[currency];
+        require(fc.currency != bytes32(0), "Currency not supported");
+        
+        uint256 price = IPriceOracle(fc.oracle).getPrice(currency);
+        require(price > 0, "Price cannot be zero");
+        
+        // Get asset decimals
+        uint8 assetDecimals = supportedAssets[collateralAsset].decimals;
+        
+        // Convert: assetAmount (in assetDecimals) × price (in currencyDecimals) = result (in currencyDecimals)
+        // Example: 795 (7.95 USD) × 1257 (12.57 BOB/USD) = 99.93 BOB = 9993 in raw
+        // Formula: (assetAmount × price) ÷ 10^assetDecimals
+        
+        uint256 result = (assetAmount * price) / (10 ** assetDecimals);
+        
+        return result;
     }
 }
