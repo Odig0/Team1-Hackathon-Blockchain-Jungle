@@ -10,7 +10,7 @@ import {
 } from '@rainbow-me/rainbowkit/wallets';
 import { useMemo } from 'react';
 import { http, createConfig } from 'wagmi';
-import { avalanche } from 'wagmi/chains';
+import { avalancheFuji } from 'wagmi/chains';
 import { NEXT_PUBLIC_WC_PROJECT_ID } from './config';
 
 export function useWagmiConfig() {
@@ -45,14 +45,14 @@ export function useWagmiConfig() {
     );
 
     const wagmiConfig = createConfig({
-      chains: [avalanche],
+      chains: [avalancheFuji],
       // enable injected provider discovery so injected wallets (eg. Core Wallet)
       // are detected and available in the modal
       multiInjectedProviderDiscovery: true,
       connectors,
       ssr: true,
       transports: {
-        [avalanche.id]: http(),
+        [avalancheFuji.id]: http(),
       },
     });
 

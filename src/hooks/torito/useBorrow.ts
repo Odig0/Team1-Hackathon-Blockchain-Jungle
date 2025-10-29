@@ -6,7 +6,6 @@ import { parseUnits } from "viem";
 import {
   TORITO_CONTRACT_ADDRESS,
   TORITO_ABI,
-  USDT_TOKEN_ADDRESS,
   stringToBytes32,
 } from "@/config/toritoContract";
 

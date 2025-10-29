@@ -16,7 +16,7 @@ export const metadata: Metadata = {
   description: 'Deposita USDT y obtén préstamos en tu moneda local',
   openGraph: {
     title: 'Torito - Préstamos con Cripto',
-    description: 'Deposita USDT y obtén préstamos en tu moneda local',
+  description: 'Deposita USDT y obtén préstamos en tu moneda local',
     images: [`${NEXT_PUBLIC_URL}/vibes/vibes-19.png`],
   },
 };

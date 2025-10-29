@@ -6,7 +6,9 @@ import {
   useWaitForTransactionReceipt,
   useReadContract,
   useAccount,
+  useChainId,
 } from "wagmi";
+import { useEffect } from "react";
 import { parseUnits } from "viem";
 import {
   TORITO_CONTRACT_ADDRESS,
@@ -49,18 +51,27 @@ export const useSupply = () => {
 
   // Leer el allowance actual
   const { data: allowanceData } = useReadContract({
-    address: USDT_TOKEN_ADDRESS,
+  address: USDT_TOKEN_ADDRESS,
     abi: ERC20_ABI,
     functionName: "allowance",
     args: address && TORITO_CONTRACT_ADDRESS ? [address, TORITO_CONTRACT_ADDRESS] : undefined,
     query: {
-      enabled: !!address && !!TORITO_CONTRACT_ADDRESS,
+      enabled: !!address && !!TORITO_CONTRACT_ADDRESS && !!USDT_TOKEN_ADDRESS,
     },
   });
 
+  const chainId = useChainId();
+
+  useEffect(() => {
+    // Debugging help: print allowance and current chain to the console
+    // Remove or lower verbosity in production
+    console.debug("useSupply: allowanceData", allowanceData);
+    console.debug("useSupply: chainId", chainId, "USDT_TOKEN_ADDRESS", USDT_TOKEN_ADDRESS);
+  }, [allowanceData, chainId]);
+
   const needsApproval = (amount: string): boolean => {
     if (!allowanceData || !amount) return true;
-  const amountWei = parseUnits(amount, 6); // USDT tiene 6 decimales
+    const amountWei = parseUnits(amount, 6); // USDT tiene 6 decimales
     return (allowanceData as bigint) < amountWei;
   };
 
@@ -72,13 +83,15 @@ export const useSupply = () => {
     setIsSupplying(true);
     setError(null);
     try {
-      const amountWei = parseUnits(amount, 6);
+  const amountWei = parseUnits(amount, 6);
       
       const hash = await writeApprove({
         address: USDT_TOKEN_ADDRESS,
         abi: ERC20_ABI,
         functionName: "approve",
         args: [TORITO_CONTRACT_ADDRESS, amountWei],
+        // Some USDT contracts or RPCs can't estimate gas correctly; provide a safe fallback gas limit
+        gas: 200000,
       });
 
       console.log("Approval transaction sent:", hash);
@@ -99,7 +112,7 @@ export const useSupply = () => {
     setError(null);
     setIsConfirmed(false);
     try {
-      const amountWei = parseUnits(amount, 6);
+  const amountWei = parseUnits(amount, 6);
 
       const hash = await writeSupply({
         address: TORITO_CONTRACT_ADDRESS,

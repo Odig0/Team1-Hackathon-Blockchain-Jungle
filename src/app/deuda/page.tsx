@@ -93,7 +93,7 @@ export default function DeudaPage() {
             </span>
           </h1>
 
-          <div className="flex gap-4 flex-wrap justify-center">
+            <div className="flex gap-4 flex-wrap justify-center">
             <BalancePill
               label={<>💰 Préstamo Original:</>}
               value={`${fmt(totalDebtUSDT)} USDT`}

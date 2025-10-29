@@ -3,7 +3,7 @@ import { OnchainKitProvider } from '@coinbase/onchainkit';
 import { RainbowKitProvider } from '@rainbow-me/rainbowkit';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import type { ReactNode } from 'react';
-import { avalanche } from 'viem/chains';
+import { avalancheFuji } from 'viem/chains';
 import { WagmiProvider } from 'wagmi';
 import { NEXT_PUBLIC_CDP_API_KEY } from '../config';
 import { useWagmiConfig } from '../wagmi';
@@ -18,10 +18,10 @@ function OnchainProviders({ children }: Props) {
   return (
     <WagmiProvider config={wagmiConfig}>
       <QueryClientProvider client={queryClient}>
-        <OnchainKitProvider apiKey={NEXT_PUBLIC_CDP_API_KEY} chain={avalanche}>
+        <OnchainKitProvider apiKey={NEXT_PUBLIC_CDP_API_KEY} chain={avalancheFuji}>
           <RainbowKitProvider
             modalSize="compact"
-            initialChain={avalanche}
+            initialChain={avalancheFuji}
           >
             {children}
           </RainbowKitProvider>

@@ -151,8 +151,8 @@ export default function Page() {
 
           <div className="flex gap-4 flex-wrap justify-center">
             <BalancePill
-              label={<>💰 Your ETH:</>}
-              value={isLoadingUsdtBalance ? undefined : `${fmt(walletUsdtBalance, "es-BO", 6)} ETH`}
+              label={<>💰 Your USDT:</>}
+              value={isLoadingUsdtBalance ? undefined : `${fmt(walletUsdtBalance, "es-BO", 6)} USDT`}
               skeleton={isLoadingUsdtBalance}
             />
             <BalancePill

@@ -1,16 +1,18 @@
 
 import { abi as TORITO } from '../../toritoabi.json' assert { type: 'json' };
-// Configuración del contrato Torito en avalanche Sepolia
+// Configuración del contrato Torito en Base Sepolia
 export const TORITO_CONTRACT_ADDRESS = '0x67CB4Eb13df5507300a2acbA069A7F5aDD364511' as `0x${string}`;
 export const BASE_SEPOLIA_CHAIN_ID = 84532;
  
 // Importar el ABI desde el archivo JSON
 
 
-// Dirección del token USDT de prueba en avalanche Sepolia
+// Dirección del token USDT de prueba en Base Sepolia
 // Este es un token ERC20 de prueba que puedes usar para testing
-// Reemplaza con la dirección de USDT en la red que uses (avalanche Sepolia por defecto)
+// Puedes obtener tokens desde https://faucet.circle.com/ (o ajustar a la dirección USDT correcta)
 export const TORITO_ABI = TORITO;
+// Este es un token ERC20 de prueba que puedes usar para testing
+// Puedes obtener tokens desde https://faucet.circle.com/ (o ajustar a la dirección USDT correcta)
 export const USDT_TOKEN_ADDRESS = '0x8964c51116010B33F5C3f2Dc1D8A62749E432566' as `0x${string}`;
 // Helper para convertir string a bytes32 (para currency)
 export function stringToBytes32(text: string): `0x${string}` {

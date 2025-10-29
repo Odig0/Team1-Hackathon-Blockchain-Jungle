@@ -113,7 +113,7 @@ const BorrowModalInner = () => {
       setLoading(true);
       const amountFiat = parseFloat(amountBs);
 
-  console.log("=== INICIANDO BORROW ===");
+      console.log("=== INICIANDO BORROW ===");
   console.log("Token colateral (USDT):", usdtAddress);
       console.log("Monto en Bs:", amountFiat);
       console.log("Currency code:", country.code);
