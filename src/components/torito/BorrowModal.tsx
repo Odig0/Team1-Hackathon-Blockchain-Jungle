@@ -6,7 +6,7 @@ import { ArrowUpTrayIcon, BanknotesIcon, BuildingLibraryIcon, QrCodeIcon } from 
 import { COUNTRIES, DEFAULT_COUNTRY_ID } from "../../constants/countries";
 import { useBorrow } from "../../hooks/torito/useBorrow";
 import { useSupplyBalance } from "../../hooks/torito/useSupplyBalance";
-import { getUSDCAddress } from "../../utils/networkConfig";
+import { getUSDTAddress } from "../../utils/networkConfig";
 
 type DestType = "bank" | "qr";
 
@@ -48,7 +48,7 @@ const BorrowModalInner = () => {
   // Hooks para blockchain
   const chainId = useChainId();
   const { borrow, isBorrowing, isConfirmed, error: borrowError } = useBorrow();
-  const usdcAddress = getUSDCAddress(chainId);
+  const usdtAddress = getUSDTAddress(chainId);
 
   // Obtener el balance del usuario de Torito
   const { formattedShares, isLoading: isLoadingBalance } = useSupplyBalance();
@@ -113,13 +113,13 @@ const BorrowModalInner = () => {
       setLoading(true);
       const amountFiat = parseFloat(amountBs);
 
-      console.log("=== INICIANDO BORROW ===");
-      console.log("Token colateral (USDC):", usdcAddress);
+  console.log("=== INICIANDO BORROW ===");
+  console.log("Token colateral (USDT):", usdtAddress);
       console.log("Monto en Bs:", amountFiat);
       console.log("Currency code:", country.code);
       console.log("Saldo en Torito:", formattedShares);
 
-      await borrow(usdcAddress, amountFiat.toString(), country.code);
+  await borrow(usdtAddress, amountFiat.toString(), country.code);
       console.log("✅ Borrow completado exitosamente");
       // No resetear loading aquí, se hará en el useEffect cuando isConfirmed sea true
     } catch (e) {

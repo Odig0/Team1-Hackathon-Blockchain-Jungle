@@ -2,12 +2,12 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { render, screen } from '@testing-library/react';
 import { beforeAll, describe, expect, it } from 'vitest';
 import { http, WagmiProvider, createConfig } from 'wagmi';
-import { base } from 'wagmi/chains';
+import { avalanche } from 'wagmi/chains';
 import { mock } from 'wagmi/connectors';
 import TransactionWrapper from './TransactionWrapper';
 
 const config = createConfig({
-  chains: [base],
+  chains: [avalanche],
   connectors: [
     mock({
       accounts: [
@@ -18,7 +18,7 @@ const config = createConfig({
     }),
   ],
   transports: {
-    [base.id]: http(),
+    [avalanche.id]: http(),
   },
 });
 const queryClient = new QueryClient();

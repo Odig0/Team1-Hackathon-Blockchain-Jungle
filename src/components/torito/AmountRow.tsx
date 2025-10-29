@@ -30,7 +30,7 @@ export const DepositBorrowCalculator: React.FC<DepositBorrowCalculatorProps> = (
   return (
     <div className="space-y-4">
       <div>
-        <label className="block text-sm font-bold text-gray-800 mb-3">💰 Deposit USDC</label>
+        <label className="block text-sm font-bold text-gray-800 mb-3">💰 Deposit USDT</label>
         <div className="relative group">
           <div className="absolute left-4 top-1/2 transform -translate-y-1/2 text-2xl text-green-500 group-focus-within:scale-110 transition-transform">+</div>
           <input
@@ -44,7 +44,7 @@ export const DepositBorrowCalculator: React.FC<DepositBorrowCalculatorProps> = (
                 : "border-gray-300 bg-white hover:border-green-400 hover:bg-green-50 focus:border-green-500 focus:bg-green-50 focus:ring-2 focus:ring-green-200 hover:shadow-md"
             } focus:outline-none`}
           />
-          <div className="absolute right-4 top-1/2 transform -translate-y-1/2 text-gray-600 font-bold group-focus-within:text-green-600 transition-colors">USDC</div>
+          <div className="absolute right-4 top-1/2 transform -translate-y-1/2 text-gray-600 font-bold group-focus-within:text-green-600 transition-colors">USDT</div>
         </div>
         {validationError && <div className="mt-2 text-sm text-red-600 font-medium">💡 {validationError}</div>}
       </div>

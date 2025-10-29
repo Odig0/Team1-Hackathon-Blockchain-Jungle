@@ -16,7 +16,7 @@ export const BalancePill: React.FC<BalancePillProps> = ({ label, value, skeleton
         {skeleton ? (
           <div className="animate-pulse bg-gray-300 h-5 w-24 rounded"></div>
         ) : (
-          <span className="text-sm font-extrabold text-purple-700">{value || "0 USDC"}</span>
+          <span className="text-sm font-extrabold text-purple-700">{value || "0 USDT"}</span>
         )}
       </div>
     </div>

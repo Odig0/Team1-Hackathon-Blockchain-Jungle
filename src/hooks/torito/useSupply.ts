@@ -11,7 +11,7 @@ import { parseUnits } from "viem";
 import {
   TORITO_CONTRACT_ADDRESS,
   TORITO_ABI,
-  USDC_TOKEN_ADDRESS,
+  USDT_TOKEN_ADDRESS,
 } from "@/config/toritoContract";
 
 // ABI del ERC20 para approve
@@ -49,7 +49,7 @@ export const useSupply = () => {
 
   // Leer el allowance actual
   const { data: allowanceData } = useReadContract({
-    address: USDC_TOKEN_ADDRESS,
+    address: USDT_TOKEN_ADDRESS,
     abi: ERC20_ABI,
     functionName: "allowance",
     args: address && TORITO_CONTRACT_ADDRESS ? [address, TORITO_CONTRACT_ADDRESS] : undefined,
@@ -60,7 +60,7 @@ export const useSupply = () => {
 
   const needsApproval = (amount: string): boolean => {
     if (!allowanceData || !amount) return true;
-    const amountWei = parseUnits(amount, 6); // USDC tiene 6 decimales
+  const amountWei = parseUnits(amount, 6); // USDT tiene 6 decimales
     return (allowanceData as bigint) < amountWei;
   };
 
@@ -75,7 +75,7 @@ export const useSupply = () => {
       const amountWei = parseUnits(amount, 6);
       
       const hash = await writeApprove({
-        address: USDC_TOKEN_ADDRESS,
+        address: USDT_TOKEN_ADDRESS,
         abi: ERC20_ABI,
         functionName: "approve",
         args: [TORITO_CONTRACT_ADDRESS, amountWei],
@@ -105,7 +105,7 @@ export const useSupply = () => {
         address: TORITO_CONTRACT_ADDRESS,
         abi: TORITO_ABI,
         functionName: "supply",
-        args: [USDC_TOKEN_ADDRESS, amountWei],
+        args: [USDT_TOKEN_ADDRESS, amountWei],
       });
 
       console.log("Supply transaction sent:", hash);

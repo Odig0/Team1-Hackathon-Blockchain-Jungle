@@ -4,7 +4,7 @@ import { useReadContract, useAccount } from "wagmi";
 import {
   TORITO_CONTRACT_ADDRESS,
   TORITO_ABI,
-  USDC_TOKEN_ADDRESS,
+  USDT_TOKEN_ADDRESS,
 } from "@/config/toritoContract";
 import { formatUnits } from "viem";
 import { useEffect } from "react";
@@ -20,9 +20,9 @@ export const useSupplyBalance = () => {
     address: TORITO_CONTRACT_ADDRESS,
     abi: TORITO_ABI,
     functionName: "supplies",
-    args: address && USDC_TOKEN_ADDRESS ? [address, USDC_TOKEN_ADDRESS] : undefined,
+    args: address && USDT_TOKEN_ADDRESS ? [address, USDT_TOKEN_ADDRESS] : undefined,
     query: {
-      enabled: !!address && !!USDC_TOKEN_ADDRESS,
+      enabled: !!address && !!USDT_TOKEN_ADDRESS,
     },
   });
 

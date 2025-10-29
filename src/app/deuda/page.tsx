@@ -18,9 +18,9 @@ export default function DeudaPage() {
   const [isProcessing, setIsProcessing] = useState(false);
 
   // Mock data - reemplazar con hooks reales
-  const totalDebtUSDT = 500; // USDC (préstamo original)
+  const totalDebtUSDT = 500; // USDT (préstamo original)
   const debtInLocal = 6000; // Bs - Esta es la deuda a pagar
-  const exchangeRate = 12; // 1 USDC = 12 Bs
+  const exchangeRate = 12; // 1 USDT = 12 Bs
   const nextPaymentDate = "15 Nov 2025";
   const interestRate = 5; // %
 
@@ -96,7 +96,7 @@ export default function DeudaPage() {
           <div className="flex gap-4 flex-wrap justify-center">
             <BalancePill
               label={<>💰 Préstamo Original:</>}
-              value={`${fmt(totalDebtUSDT)} USDC`}
+              value={`${fmt(totalDebtUSDT)} USDT`}
               skeleton={false}
             />
             <BalancePill
@@ -138,9 +138,9 @@ export default function DeudaPage() {
               <h2 className="text-2xl font-bold text-purple-900 mb-4">📊 Resumen de tu préstamo</h2>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div className="bg-white rounded-xl p-4 shadow-sm">
-                  <div className="text-sm text-gray-600 mb-1">Préstamo original (USDC)</div>
-                  <div className="text-2xl font-bold text-purple-700">{fmt(totalDebtUSDT)} USDC</div>
-                  <div className="text-sm text-gray-500 mt-1">1 USDC = {exchangeRate} Bs</div>
+                  <div className="text-sm text-gray-600 mb-1">Préstamo original (USDT)</div>
+                  <div className="text-2xl font-bold text-purple-700">{fmt(totalDebtUSDT)} USDT</div>
+                  <div className="text-sm text-gray-500 mt-1">1 USDT = {exchangeRate} Bs</div>
                 </div>
                 <div className="bg-white rounded-xl p-4 shadow-sm">
                   <div className="text-sm text-gray-600 mb-1">Deuda a pagar (Bs)</div>

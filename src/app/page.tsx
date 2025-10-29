@@ -15,7 +15,7 @@ import { CountrySelect } from "../components/torito/CountrySelect";
 import { useDeposit } from "../hooks/torito/useDeposit";
 import { useSupply } from "../hooks/torito/useSupply";
 import { useSupplyBalance } from "../hooks/torito/useSupplyBalance";
-import { useUSDCBalance } from "../hooks/torito/useUSDCBalance";
+import { useUSDTBalance } from "../hooks/torito/useUSDTBalance";
 import { fmt } from "../utils/number";
 
 export default function Page() {
@@ -23,7 +23,7 @@ export default function Page() {
   const { countryId, setCountryId, country, usdt, setUsdt, usdtNum, localAmount, loanAmount } = useDeposit();
   const { supply, approve, needsApproval, isSupplying, isConfirmed, error: supplyError } = useSupply();
   const { formattedShares, isLoading: isLoadingBalance, refetch: refetchBalance } = useSupplyBalance();
-  const { balance: walletUsdcBalance, isLoading: isLoadingUsdcBalance } = useUSDCBalance();
+  const { balance: walletUsdtBalance, isLoading: isLoadingUsdtBalance } = useUSDTBalance();
 
   const [alert, setAlert] = useState<null | { type: "success" | "error"; text: string }>(null);
   const [validationError, setValidationError] = useState<string | null>(null);
@@ -31,7 +31,7 @@ export default function Page() {
   // Validation logic
   const validateUSDTInput = (value: string): string | null => {
     if (!value || value.trim() === "") {
-      return "Enter USDC amount";
+      return "Enter USDT amount";
     }
 
     const numValue = Number(value);
@@ -44,11 +44,11 @@ export default function Page() {
       return "Amount must be greater than 0";
     }
 
-    if (numValue > walletUsdcBalance && walletUsdcBalance > 0) {
-      return `Not enough USDC (you have ${fmt(walletUsdcBalance)})`;
+    if (numValue > walletUsdtBalance && walletUsdtBalance > 0) {
+      return `Not enough USDT (you have ${fmt(walletUsdtBalance)})`;
     }
 
-    // Check for too many decimal places (USDC has 6 decimals max)
+  // Check for too many decimal places (USDT has 6 decimals max)
     const decimalParts = value.split(".");
     if (decimalParts.length > 1 && decimalParts[1].length > 6) {
       return "Maximum 6 decimal places allowed";
@@ -57,7 +57,7 @@ export default function Page() {
     return null;
   };
 
-  // Validate on USDC change
+  // Validate on USDT change
   useEffect(() => {
     if (usdt) {
       const error = validateUSDTInput(usdt);
@@ -65,7 +65,7 @@ export default function Page() {
     } else {
       setValidationError(null);
     }
-  }, [usdt, walletUsdcBalance]);
+  }, [usdt, walletUsdtBalance]);
 
   const isValidInput = !validationError && usdt && usdtNum > 0;
 
@@ -86,7 +86,7 @@ export default function Page() {
     if (supplyError) {
       setAlert({
         type: "error",
-        text: "Transaction error. Check your USDC balance and allowance.",
+        text: "Transaction error. Check your USDT balance and allowance.",
       });
     }
   }, [supplyError]);
@@ -152,8 +152,8 @@ export default function Page() {
           <div className="flex gap-4 flex-wrap justify-center">
             <BalancePill
               label={<>💰 Your ETH:</>}
-              value={isLoadingUsdcBalance ? undefined : `${fmt(walletUsdcBalance, "es-BO", 6)} ETH`}
-              skeleton={isLoadingUsdcBalance}
+              value={isLoadingUsdtBalance ? undefined : `${fmt(walletUsdtBalance, "es-BO", 6)} ETH`}
+              skeleton={isLoadingUsdtBalance}
             />
             <BalancePill
               label={
@@ -211,7 +211,7 @@ export default function Page() {
                 <div className="bg-gradient-to-r from-blue-50 to-indigo-50 border-2 border-blue-200 rounded-2xl px-5 py-4">
                   <div className="text-center">
                     <div className="text-lg font-bold text-blue-800">
-                      1 USDC = {country.symbol} {fmt(country.rate)}
+                      1 USDT = {country.symbol} {fmt(country.rate)}
                     </div>
                     <div className="text-sm text-blue-600 mt-1">{country.code} • Updated instantly</div>
                   </div>
@@ -248,9 +248,9 @@ export default function Page() {
                     Processing...
                   </div>
                 ) : isValidInput && needsApproval(usdt) ? (
-                  "🔐 Approve and Deposit USDC"
+                  "🔐 Approve and Deposit USDT"
                 ) : isValidInput ? (
-                  "💰 Deposit USDC"
+                  "💰 Deposit USDT"
                 ) : validationError ? (
                   "Fix the errors"
                 ) : (

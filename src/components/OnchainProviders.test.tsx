@@ -1,5 +1,5 @@
 import { render, screen } from '@testing-library/react';
-import { base } from 'viem/chains';
+import { avalanche } from 'viem/chains';
 import { describe, expect, it, vi } from 'vitest';
 import { http, createConfig } from 'wagmi';
 import { mock } from 'wagmi/connectors';
@@ -8,7 +8,7 @@ import OnchainProviders from './OnchainProviders';
 vi.mock('../wagmi', () => ({
   useWagmiConfig: () =>
     createConfig({
-      chains: [base],
+  chains: [avalanche],
       connectors: [
         mock({
           accounts: [
@@ -19,7 +19,7 @@ vi.mock('../wagmi', () => ({
         }),
       ],
       transports: {
-        [base.id]: http(),
+  [avalanche.id]: http(),
       },
     }),
 }));
